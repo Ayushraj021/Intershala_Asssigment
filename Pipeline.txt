@@ -1,0 +1,78 @@
+pipeline {
+    agent any
+
+    environment {
+        DOCKER_IMAGE = 'nodejs-hello-app'
+        DOCKER_TAG = "${GIT_COMMIT}"
+        DOCKER_REPO = 'ayushraj021/ubuntu' 
+        KUBE_CONFIG = '/root/.kube/config'  
+        SLACK_CHANNEL = '#all-project-1' 
+        SLACK_CREDENTIALS = '2QyUhcghCtYpJ6DEqbfyV6GZ' 
+        GITHUB_REPO = 'https://github.com/Ayushraj021/node-hello.git' 
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                git url: "${GITHUB_REPO}", branch: 'main'
+            }
+        }
+
+        stage('Install Dependencies') {
+            steps {
+                script {
+                    sh 'npm install'
+                }
+            }
+        }
+
+        stage('Run Tests') {
+            steps {
+                script {
+                    sh 'npm test'
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    sh """
+                    docker build -t ${DOCKER_REPO}/${DOCKER_IMAGE}:${DOCKER_TAG} .
+                    """
+                }
+            }
+        }
+
+        stage('Push Docker Image') {
+            steps {
+                script {
+                    sh """
+                    echo $DOCKER_PASSWORD | docker login -u $DOCKER_USERNAME --password-stdin
+                    docker push ${DOCKER_REPO}/${DOCKER_IMAGE}:${DOCKER_TAG}
+                    """
+                }
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                script {
+                    sh """
+                    kubectl --kubeconfig ${KUBE_CONFIG} set image deployment/nodejs-hello-app nodejs-hello-app=${DOCKER_REPO}/${DOCKER_IMAGE}:${DOCKER_TAG} --record
+                    kubectl --kubeconfig ${KUBE_CONFIG} rollout status deployment/nodejs-hello-app
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            slackSend (channel: SLACK_CHANNEL, color: 'good', message: "Deployment of Node.js app to Kubernetes was successful!")
+        }
+        failure {
+            slackSend (channel: SLACK_CHANNEL, color: 'danger', message: "Deployment of Node.js app to Kubernetes failed!")
+        }
+    }
+}
